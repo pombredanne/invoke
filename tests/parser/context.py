@@ -23,6 +23,35 @@ class Context_(Spec):
         c = Context(name='name', args=(a1, a2))
         assert c.args['foo'] is a1
 
+    # TODO: reconcile this sort of test organization with the .flags oriented
+    # tests within 'add_arg'.  Some of this behavior is technically driven by
+    # add_arg.
+    class args:
+        def setup(self):
+            self.c = Context(args=(
+                Argument('foo'),
+                Argument(names=('bar', 'biz')),
+                Argument('baz', attr_name='wat'),
+            ))
+
+        def exposed_as_dict(self):
+            assert 'foo' in self.c.args.keys()
+
+        def exposed_as_Lexicon(self):
+            eq_(self.c.args.bar, self.c.args['bar'])
+
+        def args_dict_includes_all_arg_names(self):
+            for x in ('foo', 'bar', 'biz'):
+                assert x in self.c.args
+
+        def argument_attr_names_appear_in_args_but_not_flags(self):
+            # Both appear as "Python-facing" args
+            for x in ('baz', 'wat'):
+                assert x in self.c.args
+            # But attr_name is for Python access only and isn't shown to the
+            # parser.
+            assert 'wat' not in self.c.flags
+
     class add_arg:
         def setup(self):
             self.c = Context()
@@ -55,6 +84,26 @@ class Context_(Spec):
             self.c.add_arg(names=('foo', 'bar'))
             assert '--foo' in self.c.flags
             assert '--bar' in self.c.flags
+
+        def adds_true_bools_to_inverse_flags(self):
+            self.c.add_arg(name='myflag', default=True, kind=bool)
+            assert '--myflag' in self.c.flags
+            assert '--no-myflag' in self.c.inverse_flags
+            eq_(self.c.inverse_flags['--no-myflag'], '--myflag')
+
+        def inverse_flags_works_right_with_task_driven_underscored_names(self):
+            # Use a Task here instead of creating a raw argument, we're partly
+            # testing Task.get_arguments()' transform of underscored names
+            # here. Yes that makes this an integration test, but it's nice to
+            # test it here at this level & not just in cli tests.
+            @task
+            def mytask(underscored_option=True):
+                pass
+            self.c.add_arg(mytask.get_arguments()[0])
+            eq_(
+                self.c.inverse_flags['--no-underscored-option'],
+                '--underscored-option'
+            )
 
         def turns_single_character_names_into_short_flags(self):
             self.c.add_arg('f')
@@ -115,8 +164,8 @@ class Context_(Spec):
             ))
             # Task/Collection generated Context
             # (will expose flags n such)
-            @task(help={'otherarg': 'other help'})
-            def mytask(myarg, otherarg):
+            @task(help={'otherarg': 'other help'}, optional=['optval'])
+            def mytask(myarg, otherarg, optval):
                 pass
             col = Collection(mytask)
             self.tasked = col.to_contexts()[0]
@@ -170,6 +219,15 @@ class Context_(Spec):
         def shortflag_inputs_work_too(self):
             eq_(self.tasked.help_for('-m'), self.tasked.help_for('--myarg'))
 
+        def optional_values_use_brackets(self):
+            eq_(
+                self.tasked.help_for('--optval'),
+                ("-p [STRING], --optval[=STRING]", "")
+            )
+
+        def underscored_args(self):
+            c = Context(args=(Argument('i_have_underscores', help='yup'),))
+            eq_(c.help_for('--i-have-underscores'), ('--i-have-underscores=STRING', 'yup'))
 
     class help_tuples:
         def returns_list_of_help_tuples(self):
@@ -256,12 +314,12 @@ class Context_(Spec):
     class str:
         "__str__"
         def with_no_args_output_is_simple(self):
-            eq_(str(Context('foo')), "<Context 'foo'>")
+            eq_(str(Context('foo')), "<parser/Context 'foo'>")
 
         def args_show_as_repr(self):
             eq_(
                 str(Context('bar', args=[Argument('arg1')])),
-                "<Context 'bar': {'arg1': <Argument: arg1>}>"
+                "<parser/Context 'bar': {'arg1': <Argument: arg1>}>"
             )
 
         def repr_is_str(self):

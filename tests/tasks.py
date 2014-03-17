@@ -46,6 +46,9 @@ class task_(Spec):
     def sets_arg_kind(self):
         skip()
 
+    def sets_which_args_are_optional(self):
+        eq_(self.vanilla['optional_values'].optional, ('myopt',))
+
     def allows_annotating_args_as_positional(self):
         eq_(self.vanilla['one_positional'].positional, ['pos'])
         eq_(self.vanilla['two_positionals'].positional, ['pos1', 'pos2'])
@@ -87,6 +90,12 @@ class task_(Spec):
         assert not task1.contextualized
         assert task2.contextualized
 
+    def sets_name(self):
+        @task(name='foo')
+        def bar():
+            pass
+        eq_(bar.name, 'foo')
+
 
 class ctask_(Spec):
     def behaves_like_task_with_contextualized_True(self):
@@ -97,12 +106,25 @@ class ctask_(Spec):
 
 
 class Task_(Spec):
+    def has_useful_repr(self):
+        i = repr(Task(_func))
+        assert '_func' in i, "'func' not found in {0!r}".format(i)
+        e = repr(Task(_func, name='funky'))
+        assert 'funky' in e, "'funky' not found in {0!r}".format(e)
+        assert '_func' not in e, "'_func' unexpectedly seen in {0!r}".format(e)
+
     class attributes:
         def has_default_flag(self):
             eq_(Task(_func).is_default, False)
 
         def has_contextualized_flag(self):
             eq_(Task(_func).contextualized, False)
+
+        def name_defaults_to_body_name(self):
+            eq_(Task(_func).name, '_func')
+
+        def can_override_name(self):
+            eq_(Task(_func, name='foo').name, 'foo')
 
     class callability:
         def setup(self):
@@ -138,7 +160,7 @@ class Task_(Spec):
 
     class get_arguments:
         def setup(self):
-            @task(positional=['arg3', 'arg1'])
+            @task(positional=['arg3', 'arg1'], optional=['arg1'])
             def mytask(arg1, arg2=False, arg3=5):
                 pass
             self.task = mytask
@@ -172,6 +194,12 @@ class Task_(Spec):
             eq_(
                 [x.positional for x in self.args],
                 [True, True, False]
+            )
+
+        def optional_flag_is_preserved(self):
+            eq_(
+                [x.optional for x in self.args],
+                [False, True, False]
             )
 
         def turns_function_signature_into_Arguments(self):
@@ -229,3 +257,12 @@ class Task_(Spec):
             def mytask(ctx):
                 pass
             eq_(len(mytask.get_arguments()), 0)
+
+        def underscores_become_dashes(self):
+            @task
+            def mytask(longer_arg):
+                pass
+            arg = mytask.get_arguments()[0]
+            eq_(arg.names, ('longer-arg', 'l'))
+            eq_(arg.attr_name, 'longer_arg')
+            eq_(arg.name, 'longer_arg')

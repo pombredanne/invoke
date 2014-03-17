@@ -19,9 +19,9 @@ listing available tasks::
     $ invoke --list
     Available tasks:
 
-        foo
-        bar
-        ...
+      foo
+      bar
+      ...
 
 Or they can modify behavior, such as overriding the default task collection
 name Invoke looks for::
@@ -29,8 +29,8 @@ name Invoke looks for::
     $ invoke --collection mytasks --list
     Available tasks:
 
-        mytask1
-        ...
+      mytask1
+      ...
 
 Tasks and task options
 ======================
@@ -58,6 +58,22 @@ Naturally, more than one flag may be given at a time::
 
     $ invoke build --progress-bar -f pdf
 
+Per-task help / printing available flags
+----------------------------------------
+
+To get help for a specific task, just give the task name as an argument to the
+core ``--help``/``-h`` option, and you'll get both its docstring (if any) and
+per-argument/flag help output::
+
+    $ invoke --help build
+
+    Docstring:
+      none
+
+    Options for 'build':
+      -f STRING, --format=STRING  Which build format type to use
+      -p, --progress-bar          Display progress bar
+
 Globbed short flags
 -------------------
 
@@ -72,15 +88,99 @@ is equivalent to (and expanded into, during parsing)::
 If the first flag in a globbed short flag token is not a boolean but takes a
 value, the rest of the glob is taken to be the value instead. E.g.::
 
-    $ invoke -fpdf
+    $ invoke build -fpdf
 
 is expanded into::
 
-    $ invoke -f pdf
+    $ invoke build -f pdf
 
 and **not**::
 
-    $ invoke -f -p -d -f
+    $ invoke build -f -p -d -f
+
+.. _optional-values:
+
+Optional flag values
+--------------------
+
+You saw a hint of this with ``--help`` specifically, but non-core options may
+also take optional values. For example, say your task has a ``--log`` flag
+that activates logging::
+
+    $ invoke compile --log
+
+but you also want it to be configurable regarding *where* to log::
+
+    $ invoke compile --log=foo.log
+
+You could implement this with an additional argument (e.g. ``--log`` and
+``--log-location``) but sometimes the concise API is the more useful one.
+
+When optional flag values are used, the values seen post-parse follow these
+rules:
+
+* If the flag is not given at all (``invoke compile``) the default value
+  (if any) is filled in just as normal.
+* If the flag is given with no value (``invoke compile --log``), it is treated
+  as if it were a ``bool`` and set to ``True``.
+* If it is given with a value (``invoke compile --log=foo.log``) then the value
+  is stored normally (including honoring ``kind`` if it was specified).
+
+Resolving ambiguity
+~~~~~~~~~~~~~~~~~~~
+
+There are a number of situations where ambiguity could arise for a flag that
+takes an optional value:
+
+* When a task takes positional arguments and they haven't all been filled in by
+  the time the parser arrives at the optional-value flag;
+* When the token following one of these flags looks like it is itself a flag;
+  or
+* When that token has the same name as another task.
+
+In any of these situations, Invoke's parser will `refuse the temptation to
+guess <http://www.python.org/dev/peps/pep-0020/>`_ and raise an error.
+
+Dashes vs underscores in flag names
+-----------------------------------
+
+In Python, it's common to use ``underscored_names`` for keyword arguments,
+e.g.::
+
+    @task
+    def mytask(my_option=False):
+        pass
+
+However, the typical convention for command-line flags is dashes, which aren't
+valid in Python identifiers::
+
+    $ invoke mytask --my-option
+
+Invoke works around this by automatically generating dashed versions of
+underscored names, when it turns your task function signatures into
+command-line parser flags.
+
+Therefore, the two examples above actually work fine together -- ``my_option``
+ends up mapping to ``--my-option``.
+
+Automatic Boolean inverse flags
+-------------------------------
+
+Boolean flags tend to work best when setting something that is normally
+``False``, to ``True``::
+
+    $ invoke mytask --yes-please-do-x
+
+However, in some cases, you want the opposite - a default of ``True``, which
+can be easily disabled. For example, colored output::
+
+    @task
+    def run_tests(color=True):
+        # ...
+
+Here, what we really want on the command line is a ``--no-color`` flag that
+sets ``color=False``. Invoke handles this for you: when setting up CLI flags,
+booleans which default to ``True`` generate a ``--no-<name>`` flag instead.
 
 
 Multiple tasks
@@ -106,23 +206,3 @@ tasks are given. This invoke says to load the ``mytasks`` collection and call
 that collection's ``foo`` task::
 
     $ invoke --collection mytasks foo --foo-args
-
-More
-====
-
-**TO COME:** detailed spec, once we've written a POC implementation (very
-soon!) Will probably live in its own document and linked at the end of this
-one. (This is a "tutorial" for CLI invocations, the spec would be more of an
-"API". The actual in-Python level API might be a third document, not sure yet.)
-
-**SEE ALSO:** :doc:`type_mapping` for thoughts on variable type operations.
-
-Also also:
-
-* Auto changing arguments eg. ``taskname(argname=default)`` turns into the
-  Argument ``--argname``.
-* Debugging: set ``INVOKE_DEBUG=true`` (or any other non-empty value) to
-  trigger debug-level logging to stdout at the very start of the program. This
-  is useful for debugging the earlier stages of the option parsing (e.g. before
-  your tasks module(s) are even loaded, which is usually where users enable
-  debugging.)

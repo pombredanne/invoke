@@ -5,15 +5,15 @@ from invocations import docs
 from invocations.testing import test
 from invocations.packaging import vendorize, release
 
-from invoke import task, run, Collection
+from invoke import ctask as task, run, Collection
 
+
+@task(name='tree')
+def doctree(ctx):
+    ctx.run("tree -Ca -I \".git|*.pyc|*.swp|dist|*.egg-info|_static|_build\" docs")
 
 @task
-def doctree():
-    run("tree -Ca -I \".git|*.pyc|*.swp|dist|*.egg-info|_static|_build\" docs")
-
-@task
-def vendorize_pexpect(version):
+def vendorize_pexpect(ctx, version):
     target = 'invoke/vendor'
     package = 'pexpect'
     vendorize(
@@ -27,5 +27,5 @@ def vendorize_pexpect(version):
     shutil.rmtree(os.path.join(target, package, 'tests'))
 
 docs = Collection.from_module(docs)
-docs.add_task(doctree, 'tree')
+docs.add_task(doctree)
 ns = Collection(test, vendorize, release, docs, vendorize_pexpect)

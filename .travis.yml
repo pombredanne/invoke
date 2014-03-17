@@ -2,20 +2,37 @@ language: python
 python:
   - "2.6"
   - "2.7"
+  - "3.2"
   - "3.3"
   - "pypy"
+matrix:
+  # pypy is frequentlyish unstable on Travis, don't let it mark entire status
+  # as 'bad' =/ (Still worth running it though.)
+  allow_failures:
+    - python: pypy
 install:
   # Install self (we are required for some of our own dev reqs for now)
   # NOTE: *do not* use -e as it adds checkout root to sys.path, which prevents
   # us from having a "pure" install environment like a new user would have.
   # E.g. it makes our internal test module importable :(
   - pip install .
-  # Install those dev requirements (test runner, etc)
-  - pip install -r dev-requirements.txt --use-mirrors
-script: "inv test"
+  # Pre-requirements sanity test (again, resembles pure, non-dev install
+  # environment.) Avoids e.g. spec's 'six' from gumming up our attempts to
+  # import our vendorized 'six'.
+  - pip install -r tasks-requirements.txt
+  - inv --list
+  # Install remaining dev requirements (test runner, etc)
+  - pip install -r dev-requirements.txt
+script:
+  - inv test
+  # Jinja2, used by Sphinx, does not work on Python 3.2 (but does on 3.3)
+  - "if [[ $TRAVIS_PYTHON_VERSION != '3.2' ]]; then inv docs; fi"
 notifications:
   irc:
     channels: "irc.freenode.org#invoke"
+    template:
+      - "%{repository}@%{branch}: %{message} (%{build_url})"
     on_success: change
     on_failure: change
+    use_notice: true
   email: false

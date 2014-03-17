@@ -29,6 +29,10 @@ class Argument_(Spec):
         def positional_is_False_by_default(self):
             eq_(Argument(name='foo').positional, False)
 
+        def can_set_attr_name_to_control_name_attr(self):
+            a = Argument('foo', attr_name='bar')
+            eq_(a.name, 'bar') # not 'foo'
+
     class string:
         "__str__"
 
@@ -139,3 +143,13 @@ class Argument_(Spec):
             a = Argument('a', kind=int)
             eq_(a.raw_value, None)
 
+    class set_value:
+        def casts_by_default(self):
+            a = Argument('a', kind=int)
+            a.set_value('5')
+            eq_(a.value, 5)
+
+        def allows_setting_value_without_casting(self):
+            a = Argument('a', kind=int)
+            a.set_value('5', cast=False)
+            eq_(a.value, '5')

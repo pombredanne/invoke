@@ -67,7 +67,8 @@ It can be invoked in the following ways, all resulting in "Hi Jeff!"::
     $ invoke hi -nJeff
 
 Again, more details on how all this works can be found in the :doc:`CLI
-concepts <concepts/cli>`.
+concepts <concepts/cli>` (for the command-line & parsing side of things) and
+the `.task` API documentation (for the declaration side).
 
 
 Listing tasks
@@ -88,7 +89,7 @@ Running shell commands
 ======================
 
 Many use cases for Invoke involve running local shell commands, similar to
-programs like Make or Rake. This is done via the `.run` function::
+programs like Make or Rake. This is done via the `~.runner.run` function::
 
     from invoke import task, run
 
@@ -104,10 +105,10 @@ You'll see the command's output in your terminal as it runs::
     ...
     build succeeded, 2 warnings.
 
-`.run` returns a useful `.Result` object providing access to the captured
-output, exit code, and so forth; it also allows you to activate a PTY, hide
-output (so it is captured only), and more. See `its API docs <.run>` for
-details.
+`~.runner.run` returns a useful `.Result` object providing access to the
+captured output, exit code, and so forth; it also allows you to activate a PTY,
+hide output (so it is captured only), and more. See `its API docs
+<.runner.run>` for details.
 
 
 Declaring pre-tasks
@@ -153,10 +154,10 @@ Let's first rename our ``tasks.py`` to be ``docs.py``; no other changes are
 needed there. Then we create a new ``tasks.py``, and for the sake of brevity
 populate it with a new, truly top level task called ``deploy``.
 
-Then we can use a new API member, the `.Collection` class, to bind this new
-task and the ``docs`` module of tasks, into a single explicit namespace. This
-typically occurs at the bottom of ``tasks.py`` once all the other objects have
-been defined, like so::
+Finally, we can use a new API member, the `.Collection` class, to bind this new
+task and the ``docs`` module into a single explicit namespace.  When Invoke
+loads your task module, if a `.Collection` object bound as ``ns`` or
+``namespace`` exists it will get used for the root namespace::
 
     from invoke import Collection, task, run
     import docs
@@ -179,65 +180,34 @@ The result::
 For a more detailed breakdown of how namespacing works, please see :doc:`the
 docs <concepts/namespaces>`.
 
+Using contexts for configurability
+==================================
 
-Handling configuration state
-============================
+While fully configurable via keyword arguments, `~.runner.run` is a pure
+function and knows nothing about the greater application. This is a problem
+when you want to alter behavior globally, such as changing the default
+fail-fast behavior, or always using a pty when running commands. It's possible
+to use module-level globals in Python, but this is a bad idea for many reasons.
 
-A number of command-line flags and other configuration channels need to affect
-global behavior; for example, controlling whether `.run` defaults to echoing
-its commands, or if nonzero return codes should abort execution.
+Instead, Invoke lets you *contextualize* tasks by passing in a context object
+containing information from whatever's executing the task (typically, the CLI
+parser.)
 
-Some libraries implement this via global module state. That approach works in
-the base case but makes testing difficult and error prone, limits concurrency,
-and just all-around makes the software more complex to use and extend.
-
-Invoke encapsulates core program state in a `.Context` object which can be
-handed to individual tasks. It serves as a configuration vector and implements
-state-aware methods which mirror or wrap the functional parts of the API.
-
-Using contexts in your tasks
-----------------------------
-
-To gain access to Invoke's context-aware API, make the following changes to the
-task definition style seen earlier:
-
-* Tell `@task <.task>` that you want your task to be *contextualized* - given a
-  context object - by saying ``contextualized=True``.
-* Define your task with an initial argument to hold the context; this argument
-  isn't taken into account during command-line parsing and is solely for
-  context handling.
-
-    * You can name it anything you want; Invoke passes the context in
-      positionally, not via keyword argument. The convention used in the
-      documentation is typically ``context`` or ``ctx``.
-
-* Replace any mentions of `.run` with ``ctx.run`` (or whatever your context
-  argument's name was).
-
-Here's a simple example::
-
-    from invoke import task
-
-    @task(contextualized=True)
-    def restart(ctx):
-        ctx.run("restart apache2")
-
-We're using slightly more boilerplate (though see below), but now your
-``ctx.run`` calls can honor command-line flags, config files and so forth.
-
-Boilerplate reduction
----------------------
-
-Clearly, calling ``contextualized=True`` for every task in your collection
-would get old fast. Invoke offers a convenience API call, `@ctask <.ctask>`,
-which is exactly the same as `@task <.task>` but whose ``contextualized`` flag
-defaults to ``True``.
-
-A common convention is thus to import it "as" ``task`` so things still look
-neat and tidy::
+It's quite easy: use `@ctask <.ctask>` instead of `@task <.task>` and add a
+context argument (named anything you want) as the first positional arg. Then
+use the context object's `~invoke.context.Context.run` method instead of the
+global function::
 
     from invoke import ctask as task
 
     @task
-    def restart(ctx):
-        ctx.run("restart apache2")
+    def mytask(ctx, other_args):
+        ctx.run("some command")
+
+This method wraps the builtin `~.runner.run` transparently, but is able to
+honor CLI flags like :option:`--echo` or :option:`--pty`.
+
+Context objects can also serve as vectors for arbitrary config values -
+allowing greater reuse of your task modules.
+
+See :doc:`the detailed context docs </concepts/context>` for details.

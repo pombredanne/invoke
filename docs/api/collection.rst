@@ -1,7 +1,7 @@
-==========
-Collection
-==========
+================================
+``Collection``: Task collections
+================================
 
 .. autoclass:: invoke.collection.Collection
     :special-members:
-    :exclude-members: __weakref__
+    :exclude-members: __weakref__, __init__

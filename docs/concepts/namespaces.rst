@@ -50,16 +50,25 @@ Naming your tasks
 =================
 
 By default, a task's function name is used as its namespace identifier, but you
-may override this with the ``name`` argument::
+may override this by giving a ``name`` argument to either `@task <.task>` (i.e.
+at definition time) or `.Collection.add_task` (i.e. at binding/attachment
+time).
+
+For example, say you have a variable name collision in your tasks module --
+perhaps you want to expose a ``dir`` task, which shadows a Python builtin.
+Naming your function itself ``dir`` is a bad idea, but you can name the
+function something like ``dir_`` and then tell ``@task`` the "real" name::
+
+    @task(name='dir')
+    def dir_():
+        # ...
+
+On the other side, you might have obtained a task object that doesn't fit with
+the names you want in your namespace, and can rename it at attachment time.
+Maybe we want to rename our ``release`` task to be called ``deploy`` instead::
 
     ns = Collection()
     ns.add_task(release, name='deploy')
-
-.. note::
-    The ``name`` kwarg is the 2nd overall argument, so those in a hurry can
-    simply say::
-
-        ns.add_task(release, 'deploy')
 
 The result::
 
@@ -67,6 +76,18 @@ The result::
     Available tasks:
 
         deploy
+
+.. note::
+    The ``name`` kwarg is the 2nd argument to ``add_task``, so those in a hurry
+    can simply say::
+
+        ns.add_task(release, 'deploy')
+
+
+Aliases
+-------
+
+# FIXME: add back aliases and merge at add_task time, as we do with name. HURR
 
 Tasks may have additional names or aliases, given as the ``aliases`` keyword
 argument; these are appended to, instead of replacing, any implicit or explicit
@@ -150,8 +171,9 @@ serving as an alternate ``Collection`` constructor which takes a Python module
 object as its first argument.
 
 Modules given to this method are scanned for ``Task`` instances, which are
-added to a new ``Collection``. This collection's name is simply taken from the
-module name (the ``__name__`` attribute).
+added to a new ``Collection``. By default, this collection's name is taken from
+the module name (the ``__name__`` attribute), though it can also be supplied
+explicitly.
 
 .. note::
     As with the default task module, you can override this default loading
@@ -210,10 +232,11 @@ Either way, the result::
 Default tasks
 =============
 
-Tasks may declare themselves as the default task to invoke for the collection
-they belong to, e.g. by giving ``default=True`` to `@task <.task>`. This is
-useful when you have a bunch of related tasks in a namespace but one of them is
-the most commonly used, and maps well to the namespace as a whole.
+Tasks may be declared as the default task to invoke for the collection they
+belong to, e.g. by giving ``default=True`` to `@task <.task>` (or to
+`.Collection.add_task`.) This is useful when you have a bunch of related tasks
+in a namespace but one of them is the most commonly used, and maps well to the
+namespace as a whole.
 
 For example, in the documentation submodule we've been experimenting with so
 far, the ``build`` task makes sense as a default, so we can say things like

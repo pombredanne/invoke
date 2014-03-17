@@ -1,5 +1,6 @@
 """
-Task definition & manipulation
+This module contains the core `.Task` class & convenience decorators used to
+generate new tasks.
 """
 import inspect
 import types
@@ -31,26 +32,47 @@ class Task(object):
     # NOTE: we shadow __builtins__.help here. It's purposeful. :(
     def __init__(self,
         body,
+        name=None,
         contextualized=False,
         aliases=(),
         positional=None,
+        optional=(),
         default=False,
         auto_shortflags=True,
         help=None,
-        pre=None
+        pre=None,
     ):
+        # Real callable
         self.body = body
-        # Must copy doc/name here because Sphinx is retarded about properties.
+        # Must copy doc/name here because Sphinx is stupid about properties.
         self.__doc__ = getattr(body, '__doc__', '')
         self.__name__ = getattr(body, '__name__', '')
+        # Is this a contextualized task?
         self.contextualized = contextualized
+        # Default name, alternate names, and whether it should act as the
+        # default for its parent collection
+        self._name = name
         self.aliases = aliases
-        self.positional = self.fill_implicit_positionals(positional)
         self.is_default = default
+        # Arg/flag/parser hints
+        self.positional = self.fill_implicit_positionals(positional)
+        self.optional = optional
         self.auto_shortflags = auto_shortflags
         self.help = help or {}
+        # Call chain bidness
         self.pre = pre or []
         self.times_called = 0
+
+    @property
+    def name(self):
+        return self._name or self.__name__
+
+    def __str__(self):
+        aliases = " ({0})".format(', '.join(self.aliases)) if self.aliases else ""
+        return "<Task {0!r}{1}>".format(self.name, aliases)
+
+    def __repr__(self):
+        return str(self)
 
     def __call__(self, *args, **kwargs):
         # Guard against calling contextualized tasks with no context.
@@ -69,6 +91,9 @@ class Task(object):
         Returns two-tuple:
 
         * First item is list of arg names, in order defined.
+
+            * I.e. we *cannot* simply use a dict's ``keys()`` method here.
+
         * Second item is dict mapping arg names to default values or
           task.NO_DEFAULT (i.e. an 'empty' value distinct from None).
         """
@@ -99,7 +124,12 @@ class Task(object):
         return positional
 
     def arg_opts(self, name, default, taken_names):
-        # Argument name(s)
+        opts = {}
+        # Argument name(s) (replace w/ dashed version if underscores present,
+        # and move the underscored version to be the attr_name instead.)
+        if '_' in name:
+            opts['attr_name'] = name
+            name = name.replace('_', '-')
         names = [name]
         if self.auto_shortflags:
             # Must know what short names are available
@@ -107,7 +137,7 @@ class Task(object):
                 if not (char == name or char in taken_names):
                     names.append(char)
                     break
-        opts = {'names': names}
+        opts['names'] = names
         # Handle default value & kind if possible
         if default not in (None, NO_DEFAULT):
             # TODO: allow setting 'kind' explicitly.
@@ -118,6 +148,8 @@ class Task(object):
             opts['help'] = self.help[name]
         # Whether it's positional or not
         opts['positional'] = name in self.positional
+        # Whether it is a value-optional flag
+        opts['optional'] = name in self.optional
         return opts
 
     def get_arguments(self):
@@ -161,9 +193,12 @@ def task(*args, **kwargs):
     specified. Otherwise, the following keyword arguments are allowed in the
     parenthese'd form:
 
+    * ``name``: Default name to use when binding to a `.Collection`. Useful for
+      avoiding Python namespace issues (i.e. when the desired CLI level name
+      can't or shouldn't be used as the Python level name.)
     * ``contextualized``: Hints to callers (especially the CLI) that this task
-      expects to be given a `.Context` object as its first argument when
-      called.
+      expects to be given a `~invoke.context.Context` object as its first
+      argument when called.
     * ``aliases``: Specify one or more aliases for this task, allowing it to be
       invoked as multiple different names. For example, a task named ``mytask``
       with a simple ``@task`` wrapper may only be invoked as ``"mytask"``.
@@ -174,11 +209,16 @@ def task(*args, **kwargs):
       names, no args besides those named in this iterable will be considered
       positional. (This means that an empty list will force all arguments to be
       given as explicit flags.)
+    * ``optional``: Iterable of argument names, declaring those args to
+      have :ref:`optional values <optional-values>`. Such arguments may be
+      given as value-taking options (e.g. ``--my-arg=myvalue``, wherein the
+      task is given ``"myvalue"``) or as Boolean flags (``--my-arg``, resulting
+      in ``True``).
     * ``default``: Boolean option specifying whether this task should be its
       collection's default task (i.e. called if the collection's own name is
       given.)
-    * ``auto_shortflags``: Whether or not to :ref:`automatically create short
-      flags <automatic-shortflags>` from task options; defaults to True.
+    * ``auto_shortflags``: Whether or not to automatically create short
+      flags from task options; defaults to True.
     * ``help``: Dict mapping argument names to their help strings. Will be
       displayed in ``--help`` output.
     * ``pre``: List of task names, for tasks that should get run prior to the
@@ -200,9 +240,11 @@ def task(*args, **kwargs):
         kwargs['pre'] = args
     # @task(options)
     # TODO: pull in centrally defined defaults here (see Task)
+    name = kwargs.pop('name', None)
     contextualized = kwargs.pop('contextualized', False)
     aliases = kwargs.pop('aliases', ())
     positional = kwargs.pop('positional', None)
+    optional = tuple(kwargs.pop('optional', ()))
     default = kwargs.pop('default', False)
     auto_shortflags = kwargs.pop('auto_shortflags', True)
     help = kwargs.pop('help', {})
@@ -214,9 +256,11 @@ def task(*args, **kwargs):
     def inner(obj):
         obj = Task(
             obj,
+            name=name,
             contextualized=contextualized,
             aliases=aliases,
             positional=positional,
+            optional=optional,
             default=default,
             auto_shortflags=auto_shortflags,
             help=help,
@@ -227,5 +271,10 @@ def task(*args, **kwargs):
 
 
 def ctask(*args, **kwargs):
+    """
+    Wrapper for `.task` which sets ``contextualized=True`` by default.
+
+    Please see `.task` for documentation.
+    """
     kwargs.setdefault('contextualized', True)
     return task(*args, **kwargs)

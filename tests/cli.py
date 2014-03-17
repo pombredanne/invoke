@@ -48,6 +48,13 @@ class CLI(Spec):
             "whatevs\n"
         )
 
+    @trap
+    def invocation_with_underscored_args(self):
+        _output_eq(
+            "invoke -c integration print_underscored_arg --my-option whatevs",
+            "whatevs\n"
+        )
+
     def contextualized_tasks_are_given_parser_context_arg(self):
         # go() in contextualized.py just returns its initial arg
         retval = dispatch(['-c', 'contextualized', 'go'])[0]
@@ -73,8 +80,9 @@ Core options:
   --no-dedupe                      Disable task deduplication.
   -c STRING, --collection=STRING   Specify collection name to load. May be
                                    given >1 time.
+  -d, --debug                      Enable debug output.
   -e, --echo                       Echo executed commands before running.
-  -h, --help                       Show this help message and exit.
+  -h [STRING], --help[=STRING]     Show core or per-task help and exit.
   -H STRING, --hide=STRING         Set default value of run()'s 'hide' kwarg.
   -l, --list                       List available tasks.
   -p, --pty                        Use a pty when executing shell commands.
@@ -91,8 +99,57 @@ Core options:
         eq_(r2.stdout, expected)
 
     @trap
+    def per_task_help_prints_help_for_task_only(self):
+        expected = """
+Usage: inv[oke] [--core-opts] punch [--options] [other tasks here ...]
+
+Docstring:
+  none
+
+Options:
+  -h STRING, --why=STRING   Motive
+  -w STRING, --who=STRING   Who to punch
+
+""".lstrip()
+        r1 = run("inv -c decorator -h punch", hide='out')
+        r2 = run("inv -c decorator --help punch", hide='out')
+        eq_(r1.stdout, expected)
+        eq_(r2.stdout, expected)
+
+    @trap
+    def per_task_help_works_for_unparameterized_tasks(self):
+        expected = """
+Usage: inv[oke] [--core-opts] biz [other tasks here ...]
+
+Docstring:
+  none
+
+Options:
+  none
+
+""".lstrip()
+        r = run("inv -c decorator -h biz", hide='out')
+        eq_(r.stdout, expected)
+
+    @trap
+    def per_task_help_displays_docstrings_if_given(self):
+        expected = """
+Usage: inv[oke] [--core-opts] foo [other tasks here ...]
+
+Docstring:
+  Foo the bar.
+  
+Options:
+  none
+
+""".lstrip()
+        r = run("inv -c decorator -h foo", hide='out')
+        eq_(r.stdout, expected)
+
+    @trap
     def version_info(self):
         eq_(run("invoke -V").stdout, "Invoke %s\n" % invoke.__version__)
+
 
     class task_list:
         "--list"
@@ -103,7 +160,7 @@ Available tasks:
 
 %s
 
-""" % '\n'.join("    " + x for x in lines)).lstrip()
+""" % '\n'.join("  " + x for x in lines)).lstrip()
 
         @trap
         def simple_output(self):
@@ -112,6 +169,7 @@ Available tasks:
                 'foo',
                 'print_foo',
                 'print_name',
+                'print_underscored_arg',
             )
             for flag in ('-l', '--list'):
                 eq_(run("invoke -c integration %s" % flag).stdout, expected)
@@ -169,6 +227,10 @@ bar
 """.lstrip()
         eq_(run("invoke -c integration --no-dedupe foo bar").stdout, expected)
 
+    @trap
+    def debug_flag(self):
+        assert 'my-sentinel' in run("invoke -d -c debugging foo").stderr
+
     class run_options:
         "run() related CLI flags"
         def _test_flag(self, flag, kwarg, value):
@@ -220,7 +282,8 @@ class CLIParsing(Spec):
     """
     def setup(self):
         @task(positional=[])
-        def mytask(mystring, s, boolean=False, b=False, v=False):
+        def mytask(mystring, s, boolean=False, b=False, v=False,
+            long_name=False, true_bool=True):
             pass
         @task(aliases=['mytask27'])
         def mytask2():
@@ -246,10 +309,16 @@ class CLIParsing(Spec):
     def _compare(self, invoke, flagname, value):
         invoke = "mytask " + invoke
         result = self._parse(invoke)
-        eq_(result.to_dict()['mytask'][flagname], value)
+        eq_(result[0].args[flagname].value, value)
 
     def _compare_names(self, given, real):
         eq_(self._parse(given)[0].name, real)
+
+    def underscored_flags_can_be_given_as_dashed(self):
+        self._compare('--long-name', 'long_name', True)
+
+    def inverse_boolean_flags(self):
+        self._compare('--no-true-bool', 'true_bool', False)
 
     def namespaced_task(self):
         self._compare_names("sub.subtask", "sub.subtask")

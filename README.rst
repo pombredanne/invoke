@@ -1,17 +1,7 @@
 .. image:: https://secure.travis-ci.org/pyinvoke/invoke.png?branch=master
+        :target: https://travis-ci.org/pyinvoke/invoke
 
-**BIG HONKIN' DISCLAIMER:** This software is currently in beta. It's
-test-driven and dogfooded, but feature set & documentation has holes & rough
-spots. **Please** make sure you search the `known issues
-<https://github.com/pyinvoke/invoke/issues>`_ before submitting new bug reports
--- we already know it doesn't do X, Y and Z and will be sprinting to beef
-things up ASAP.
-
-**Thank you!**
-
-----
-
-Invoke is a Python (2.6+ and 3.3+) task execution tool & library, drawing inspiration from various sources to arrive at a powerful & clean feature set.
+Invoke is a Python (2.6+ and 3.2+) task execution tool & library, drawing inspiration from various sources to arrive at a powerful & clean feature set.
 
 * Like Ruby's Rake tool and Invoke's own predecessor Fabric 1.x, it provides a
   clean, high level API for running shell commands and defining/organizing
@@ -23,11 +13,11 @@ Invoke is a Python (2.6+ and 3.3+) task execution tool & library, drawing inspir
     def clean(docs=False, bytecode=False, extra=''):
         patterns = ['build']
         if docs:
-            patterns += 'docs/_build'
+            patterns.append('docs/_build')
         if bytecode:
-            patterns += '**/*.pyc'
+            patterns.append('**/*.pyc')
         if extra:
-            patterns += extra
+            patterns.append(extra)
         for pattern in patterns:
             run("rm -rf %s" % pattern)
 
@@ -35,7 +25,7 @@ Invoke is a Python (2.6+ and 3.3+) task execution tool & library, drawing inspir
     def build(docs=False):
         run("python setup.py build")
         if docs:
-            run("sphinx-build")
+            run("sphinx-build docs docs/_build")
 
 * From GNU Make, it inherits an emphasis on minimal boilerplate for common
   patterns and the ability to run multiple tasks in a single invocation::

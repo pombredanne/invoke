@@ -2,8 +2,8 @@ from datetime import datetime
 import os
 import sys
 
-exts = ('autodoc', 'viewcode')
-extensions = map(lambda x: 'sphinx.ext.%s' % x, exts)
+exts = ('autodoc',)# 'viewcode')
+extensions = list(map(lambda x: 'sphinx.ext.%s' % x, exts))
 templates_path = ['_templates']
 source_suffix = '.rst'
 master_doc = 'index'
@@ -19,7 +19,6 @@ default_role = 'py:obj'
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), '..')))
 
 exclude_trees = ['_build']
-default_role = 'obj'
 pygments_style = 'sphinx'
 html_theme = 'default'
 
@@ -28,9 +27,15 @@ html_style = 'rtd.css'
 html_static_path = ['_static']
 
 latex_documents = [
-  ('index', 'Invoke.tex', u'Invoke Documentation',
+  ('index', 'invoke.tex', u'Invoke Documentation',
    u'Jeff Forcier', 'manual'),
 ]
 
 # Autodoc settings
 autodoc_default_flags = ['members']
+autoclass_content = 'both'
+
+# Releases for nice changelog, + settings
+extensions.append('releases')
+releases_release_uri = "https://github.com/pyinvoke/invoke/tree/%s"
+releases_issue_uri = "https://github.com/pyinvoke/invoke/issues/%s"

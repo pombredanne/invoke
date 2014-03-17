@@ -10,6 +10,12 @@ What is Invoke?
 See :doc:`getting_started` for a quick-start guide.
 
 
+What changed recently?
+======================
+
+See :doc:`the changelog <changelog>` for details.
+
+
 How can I install it?
 =====================
 
@@ -18,7 +24,7 @@ via `pip <http://pip-installer.org>`_::
 
     $ pip install invoke
 
-We currently support **Python 2.6/2.7** and **Python 3.3+**. Users still on
+We currently support **Python 2.6/2.7** and **Python 3.2+**. Users still on
 Python 2.5 or older are urged to upgrade.
 
 As long as you have a supported Python interpreter, **there are no other
@@ -44,16 +50,46 @@ the ``==dev`` "version" explicitly::
 How do I use it?
 ================
 
+Getting started
+---------------
+
+Many core ideas & API calls are explained in the tutorial/getting-started
+document:
+
+.. toctree::
+    getting_started
+
+Concepts
+--------
+
+Dig deeper into specific topics:
+
 .. toctree::
     :maxdepth: 3
     :glob:
 
-    getting_started
-    concepts
-    api
+    concepts/*
 
-It's broken, or doesn't do what I want! How can I submit bugs?
-==============================================================
+API
+---
+
+Know what you're looking for & just need API details? View our auto-generated
+API documentation:
+
+.. toctree::
+    :maxdepth: 3
+    :glob:
+
+    api/*
+
+It's broken!
+============
+
+Are you sure? Make sure you've read :doc:`the FAQ </faq>`!
+
+
+It's definitely broken, or doesn't do what I want! How can I submit bugs?
+=========================================================================
 
 Before submitting a bug, please do the following:
 
@@ -84,6 +120,10 @@ How can I contribute?
 Thanks for asking! Please see our :doc:`contribution documentation
 <contributing>` for details.
 
+Our test suite is stored in the ``tests/`` folder, and may be executed via
+``$ invoke test`` (or, if your Invoke is currently inoperable, ``$ spec`` will
+suffice.)
+
 
 .. _contact:
 
@@ -95,7 +135,8 @@ following ways:
 
 * IRC: ``#invoke`` on Freenode
 * Twitter: `@pyinvoke <https://twitter.com/pyinvoke>`_
-* Mailing list: TK
+* Mailing list: ``invoke@librelist.com`` (see `the LibreList homepage
+  <http://librelist.com>`_ for usage details).
 * Blog: TK
 
 
