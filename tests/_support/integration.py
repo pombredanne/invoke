@@ -17,6 +17,22 @@ def print_underscored_arg(my_option):
 def foo():
     print("foo")
 
-@task('foo')
+@task(foo)
 def bar():
     print("bar")
+
+@task
+def post2():
+    print("post2")
+
+@task(post=[post2])
+def post1():
+    print("post1")
+
+@task(foo, bar, post=[post1, post2])
+def biz():
+    print("biz")
+
+@task(bar, foo, post=[post2, post1])
+def boz():
+    print("boz")

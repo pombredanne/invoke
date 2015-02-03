@@ -3,10 +3,29 @@ import os
 
 from spec import eq_, skip, Spec, raises, ok_, trap
 
-from invoke.runner import run
+from invoke.runner import Runner, run
 from invoke.exceptions import Failure
 
-from _utils import support
+from _utils import support, reset_cwd
+
+
+def _run(returns=None, **kwargs):
+    """
+    Create a Runner w/ retval reflecting ``returns`` & call ``run(**kwargs)``.
+    """
+    # Set up return value tuple for Runner.run
+    returns = returns or {}
+    returns.setdefault('exited', 0)
+    value = map(
+        lambda x: returns.get(x, None),
+        ('stdout', 'stderr', 'exited', 'exception'),
+    )
+    class MockRunner(Runner):
+        def run(self, command, warn, hide):
+            return value
+    # Ensure top level run() uses that runner, provide dummy command.
+    kwargs['runner'] = MockRunner
+    return run("whatever", **kwargs)
 
 
 class Run(Spec):
@@ -18,6 +37,9 @@ class Run(Spec):
         self.out = "echo foo"
         self.err = "./err bar"
         self.sub = "inv -c pty_output hide_%s"
+
+    def teardown(self):
+        reset_cwd()
 
     class return_value:
         def return_code_in_result(self):
@@ -40,21 +62,17 @@ class Run(Spec):
         def stderr_attribute_contains_stderr(self):
             eq_(run(self.err, hide='both').stderr, 'bar\n')
 
-        def stdout_contains_both_streams_under_pty(self):
-            r = run(self.both, hide='both', pty=True)
-            eq_(r.stdout, 'foo\r\nbar\r\n')
-
-        def stderr_is_empty_under_pty(self):
-            r = run(self.both, hide='both', pty=True)
-            eq_(r.stderr, '')
-
         def ok_attr_indicates_success(self):
-            eq_(run("true").ok, True)
-            eq_(run("false", warn=True).ok, False)
+            eq_(_run().ok, True)
+            eq_(_run(returns={'exited': 1}, warn=True).ok, False)
 
         def failed_attr_indicates_failure(self):
-            eq_(run("true").failed, False)
-            eq_(run("false", warn=True).failed, True)
+            eq_(_run().failed, False)
+            eq_(_run(returns={'exited': 1}, warn=True).failed, True)
+
+        def has_exception_attr(self):
+            eq_(_run().exception, None)
+
 
     class failure_handling:
         @raises(Failure)
@@ -73,7 +91,7 @@ class Run(Spec):
 
         def Failure_repr_includes_stderr(self):
             try:
-                run("./err ohnoz && exit 1")
+                run("./err ohnoz && exit 1", hide='both')
                 assert false # Ensure failure to Failure fails
             except Failure as f:
                 r = repr(f)
@@ -168,6 +186,16 @@ class Run(Spec):
         def pty_defaults_to_off(self):
             eq_(run("true").pty, False)
 
+        def complex_nesting_doesnt_break(self):
+            # GH issue 191
+            substr = "      hello\t\t\nworld with spaces"
+            cmd = """ eval 'echo "{0}" ' """.format(substr)
+            # TODO: consider just mocking os.execv here (and in the other
+            # tests) though that feels like too much of a tautology / testing
+            # pexpect
+            expected = '      hello\t\t\r\nworld with spaces\r\n'
+            eq_(run(cmd, pty=True, hide='both').stdout, expected)
+
     class command_echo:
         @trap
         def does_not_echo_commands_run_by_default(self):
@@ -206,3 +234,20 @@ class Run(Spec):
         def nonprinting_bytes_pty(self):
             # PTY use adds another utf-8 decode spot which can also fail.
             run("echo '\xff'", pty=True, hide='both')
+
+
+class Local_(Spec):
+    def setup(self):
+        os.chdir(support)
+        self.both = "echo foo && ./err bar"
+
+    def teardown(self):
+        reset_cwd()
+
+    def stdout_contains_both_streams_under_pty(self):
+        r = run(self.both, hide='both', pty=True)
+        eq_(r.stdout, 'foo\r\nbar\r\n')
+
+    def stderr_is_empty_under_pty(self):
+        r = run(self.both, hide='both', pty=True)
+        eq_(r.stderr, '')

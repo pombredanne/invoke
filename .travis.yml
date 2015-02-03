@@ -4,6 +4,7 @@ python:
   - "2.7"
   - "3.2"
   - "3.3"
+  - "3.4"
   - "pypy"
 matrix:
   # pypy is frequentlyish unstable on Travis, don't let it mark entire status
@@ -11,11 +12,6 @@ matrix:
   allow_failures:
     - python: pypy
 install:
-  # Install self (we are required for some of our own dev reqs for now)
-  # NOTE: *do not* use -e as it adds checkout root to sys.path, which prevents
-  # us from having a "pure" install environment like a new user would have.
-  # E.g. it makes our internal test module importable :(
-  - pip install .
   # Pre-requirements sanity test (again, resembles pure, non-dev install
   # environment.) Avoids e.g. spec's 'six' from gumming up our attempts to
   # import our vendorized 'six'.
@@ -24,9 +20,16 @@ install:
   # Install remaining dev requirements (test runner, etc)
   - pip install -r dev-requirements.txt
 script:
+  # Main test suite
   - inv test
-  # Jinja2, used by Sphinx, does not work on Python 3.2 (but does on 3.3)
-  - "if [[ $TRAVIS_PYTHON_VERSION != '3.2' ]]; then inv docs; fi"
+  # Slow, annoying-to-run-every-time integration suite
+  - inv integration
+  # Websites build OK? (NOTE: sphinx/jinja are fucked on Python 3.2 now?)
+  - "[[ $TRAVIS_PYTHON_VERSION == 3.2 ]] || inv sites"
+  # Did we break setup.py?
+  - pip uninstall -y invoke # To undo the implicit -e install from above
+  - pip install . # NO -e!
+  - inv -l # Sanity check
 notifications:
   irc:
     channels: "irc.freenode.org#invoke"
@@ -34,5 +37,4 @@ notifications:
       - "%{repository}@%{branch}: %{message} (%{build_url})"
     on_success: change
     on_failure: change
-    use_notice: true
   email: false

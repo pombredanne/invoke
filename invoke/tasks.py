@@ -17,7 +17,7 @@ else:
     from itertools import izip_longest as zip_longest
 
 
-# Non-None sentinel
+#: Sentinel object representing a truly blank value (vs ``None``).
 NO_DEFAULT = object()
 
 
@@ -41,6 +41,8 @@ class Task(object):
         auto_shortflags=True,
         help=None,
         pre=None,
+        post=None,
+        autoprint=False,
     ):
         # Real callable
         self.body = body
@@ -61,18 +63,46 @@ class Task(object):
         self.help = help or {}
         # Call chain bidness
         self.pre = pre or []
+        self.post = post or []
         self.times_called = 0
+        # Whether to print return value post-execution
+        self.autoprint = autoprint
 
     @property
     def name(self):
         return self._name or self.__name__
 
     def __str__(self):
-        aliases = " ({0})".format(', '.join(self.aliases)) if self.aliases else ""
+        aliases = ""
+        if self.aliases:
+            aliases = " ({0})".format(', '.join(self.aliases))
         return "<Task {0!r}{1}>".format(self.name, aliases)
 
     def __repr__(self):
         return str(self)
+
+    def __eq__(self, other):
+        if self.name != other.name:
+            return False
+        # Functions do not define __eq__ but func_code objects apparently do.
+        # (If we're wrapping some other callable, they will be responsible for
+        # defining equality on their end.)
+        if self.body == other.body:
+            return True
+        else:
+            try:
+                return (
+                    six.get_function_code(self.body) ==
+                    six.get_function_code(other.body)
+                )
+            except AttributeError:
+                return False
+
+    def __hash__(self):
+        # Presumes name and body will never be changed. Hrm.
+        # Potentially cleaner to just not use Tasks as hash keys, but let's do
+        # this for now.
+        return hash(self.name) + hash(self.body)
 
     def __call__(self, *args, **kwargs):
         # Guard against calling contextualized tasks with no context.
@@ -95,7 +125,8 @@ class Task(object):
             * I.e. we *cannot* simply use a dict's ``keys()`` method here.
 
         * Second item is dict mapping arg names to default values or
-          task.NO_DEFAULT (i.e. an 'empty' value distinct from None).
+          `.NO_DEFAULT` (an 'empty' value distinct from None, since None
+          is a valid value on its own).
         """
         # Handle callable-but-not-function objects
         # TODO: __call__ exhibits the 'self' arg; do we manually nix 1st result
@@ -125,6 +156,10 @@ class Task(object):
 
     def arg_opts(self, name, default, taken_names):
         opts = {}
+        # Whether it's positional or not
+        opts['positional'] = name in self.positional
+        # Whether it is a value-optional flag
+        opts['optional'] = name in self.optional
         # Argument name(s) (replace w/ dashed version if underscores present,
         # and move the underscored version to be the attr_name instead.)
         if '_' in name:
@@ -146,10 +181,6 @@ class Task(object):
         # Help
         if name in self.help:
             opts['help'] = self.help[name]
-        # Whether it's positional or not
-        opts['positional'] = name in self.positional
-        # Whether it is a value-optional flag
-        opts['optional'] = name in self.optional
         return opts
 
     def get_arguments(self):
@@ -197,8 +228,8 @@ def task(*args, **kwargs):
       avoiding Python namespace issues (i.e. when the desired CLI level name
       can't or shouldn't be used as the Python level name.)
     * ``contextualized``: Hints to callers (especially the CLI) that this task
-      expects to be given a `~invoke.context.Context` object as its first
-      argument when called.
+      expects to be given a `.Context` object as its first argument when
+      called.
     * ``aliases``: Specify one or more aliases for this task, allowing it to be
       invoked as multiple different names. For example, a task named ``mytask``
       with a simple ``@task`` wrapper may only be invoked as ``"mytask"``.
@@ -221,8 +252,11 @@ def task(*args, **kwargs):
       flags from task options; defaults to True.
     * ``help``: Dict mapping argument names to their help strings. Will be
       displayed in ``--help`` output.
-    * ``pre``: List of task names, for tasks that should get run prior to the
-      wrapped task whenever it is executed via the command line.
+    * ``pre``, ``post``: Lists of task objects to execute prior to, or after,
+      the wrapped task whenever it is executed.
+    * ``autoprint``: Boolean determining whether to automatically print this
+      task's return value to standard output when invoked directly via the CLI.
+      Defaults to False.
 
     If any non-keyword arguments are given, they are taken as the value of the
     ``pre`` kwarg for convenience's sake. (It is an error to give both
@@ -231,7 +265,7 @@ def task(*args, **kwargs):
     # @task -- no options were (probably) given.
     # Also handles ctask's use case when given as @ctask, equivalent to
     # @task(obj, contextualized=True).
-    if len(args) == 1 and callable(args[0]):
+    if len(args) == 1 and callable(args[0]) and not isinstance(args[0], Task):
         return Task(args[0], **kwargs)
     # @task(pre, tasks, here)
     if args:
@@ -249,6 +283,8 @@ def task(*args, **kwargs):
     auto_shortflags = kwargs.pop('auto_shortflags', True)
     help = kwargs.pop('help', {})
     pre = kwargs.pop('pre', [])
+    post = kwargs.pop('post', [])
+    autoprint = kwargs.pop('autoprint', False)
     # Handle unknown kwargs
     if kwargs:
         kwarg = (" unknown kwargs %r" % (kwargs,)) if kwargs else ""
@@ -264,7 +300,9 @@ def task(*args, **kwargs):
             default=default,
             auto_shortflags=auto_shortflags,
             help=help,
-            pre=pre
+            pre=pre,
+            post=post,
+            autoprint=autoprint,
         )
         return obj
     return inner
@@ -278,3 +316,34 @@ def ctask(*args, **kwargs):
     """
     kwargs.setdefault('contextualized', True)
     return task(*args, **kwargs)
+
+
+class Call(object):
+    """
+    Represents a call/execution of a `.Task` with some arguments.
+
+    Wraps its `.Task` so it can be treated as one by `.Executor`.
+
+    Similar to `~functools.partial` with some added functionality (such as the
+    delegation to the inner task, and optional tracking of a given name.)
+    """
+    def __init__(self, task, *args, **kwargs):
+        self.task = task
+        self.args = args
+        self.kwargs = kwargs
+        self.name = None # Mostly manipulated by client code
+
+    def __getattr__(self, name):
+        return getattr(self.task, name)
+
+    def __str__(self):
+        return "<Call {0!r}, args: {1!r} kwargs: {2!r}>".format(
+            self.task.name, self.args, self.kwargs
+        )
+
+    def __repr__(self):
+        return str(self)
+
+
+# Convenience/aesthetically pleasing-ish alias
+call = Call

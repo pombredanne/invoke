@@ -1,7 +1,7 @@
 from spec import Spec, skip, eq_, raises
 
 from invoke.tasks import task, ctask, Task
-from invoke.loader import Loader
+from invoke.loader import FilesystemLoader as Loader
 
 from _utils import support
 
@@ -19,8 +19,8 @@ class task_(Spec):
     "@task"
 
     def setup(self):
-        self.loader = Loader(root=support)
-        self.vanilla = self.loader.load_collection('decorator')
+        self.loader = Loader(start=support)
+        self.vanilla = self.loader.load('decorator')
 
     def allows_access_to_wrapped_object(self):
         def lolcats():
@@ -36,9 +36,14 @@ class task_(Spec):
     def allows_default_specification(self):
         eq_(self.vanilla[''], self.vanilla['biz'])
 
+    def has_autoprint_option(self):
+        ap = self.loader.load('autoprint')
+        eq_(ap['nope'].autoprint, False)
+        eq_(ap['yup'].autoprint, True)
+
     @raises(ValueError)
     def raises_ValueError_on_multiple_defaults(self):
-        self.loader.load_collection('decorator_multi_default')
+        self.loader.load('decorator_multi_default')
 
     def sets_arg_help(self):
         eq_(self.vanilla['punch'].help['why'], 'Motive')
@@ -62,21 +67,36 @@ class task_(Spec):
             pass
         eq_(len(mytask.positional), 0)
 
-    def pre_tasks_stored_as_simple_list_of_strings(self):
-        @task(pre=['whatever'])
+    def pre_tasks_stored_directly(self):
+        @task
+        def whatever():
+            pass
+        @task(pre=[whatever])
         def func():
             pass
-        eq_(func.pre, ['whatever'])
+        eq_(func.pre, [whatever])
 
     def allows_star_args_as_shortcut_for_pre(self):
-        @task('my', 'pre', 'tasks')
+        @task
+        def pre1():
+            pass
+        @task
+        def pre2():
+            pass
+        @task(pre1, pre2)
         def func():
             pass
-        eq_(func.pre, ('my', 'pre', 'tasks'))
+        eq_(func.pre, (pre1, pre2))
 
     @raises(TypeError)
-    def no_ambiguity_between_star_args_and_pre_kwarg(self):
-        @task('lol', 'wut', pre=['no', 'wai'])
+    def disallows_ambiguity_between_star_args_and_pre_kwarg(self):
+        @task
+        def pre1():
+            pass
+        @task
+        def pre2():
+            pass
+        @task(pre1, pre=[pre2])
         def func():
             pass
 
@@ -112,6 +132,13 @@ class Task_(Spec):
         e = repr(Task(_func, name='funky'))
         assert 'funky' in e, "'funky' not found in {0!r}".format(e)
         assert '_func' not in e, "'_func' unexpectedly seen in {0!r}".format(e)
+
+    def equality_testing(self):
+        t1 = Task(_func, name='foo')
+        t2 = Task(_func, name='foo')
+        eq_(t1, t2)
+        t3 = Task(_func, name='bar')
+        assert t1 != t3
 
     class attributes:
         def has_default_flag(self):
@@ -160,8 +187,8 @@ class Task_(Spec):
 
     class get_arguments:
         def setup(self):
-            @task(positional=['arg3', 'arg1'], optional=['arg1'])
-            def mytask(arg1, arg2=False, arg3=5):
+            @task(positional=['arg_3', 'arg1'], optional=['arg1'])
+            def mytask(arg1, arg2=False, arg_3=5):
                 pass
             self.task = mytask
             self.args = self.task.get_arguments()
@@ -179,7 +206,7 @@ class Task_(Spec):
             return self._arglist_to_dict(task.get_arguments())
 
         def positional_args_come_first(self):
-            eq_(self.args[0].name, 'arg3')
+            eq_(self.args[0].name, 'arg_3')
             eq_(self.args[1].name, 'arg1')
             eq_(self.args[2].name, 'arg2')
 
@@ -215,7 +242,7 @@ class Task_(Spec):
             for short, long_ in (
                 ('a', 'arg1'),
                 ('r', 'arg2'),
-                ('g', 'arg3'),
+                ('g', 'arg-3'),
             ):
                 assert self.argdict[short] is self.argdict[long_]
 

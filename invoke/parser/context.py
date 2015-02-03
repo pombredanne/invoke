@@ -40,7 +40,9 @@ def flag_key(x):
     return ret
 
 
-class Context(object):
+# Named slightly more verbose so Sphinx references can be unambiguous.
+# Got real sick of fully qualified paths.
+class ParserContext(object):
     """
     Parsing context with knowledge of flags & their format.
 
@@ -51,11 +53,11 @@ class Context(object):
     """
     def __init__(self, name=None, aliases=(), args=()):
         """
-        Create a new ``Context`` named ``name``, with ``aliases``.
+        Create a new ``ParserContext`` named ``name``, with ``aliases``.
 
         ``name`` is optional, and should be a string if given. It's used to
-        tell Context objects apart, and for use in a Parser when determining
-        what chunk of input might belong to a given Context.
+        tell ParserContext objects apart, and for use in a Parser when
+        determining what chunk of input might belong to a given ParserContext.
 
         ``aliases`` is also optional and should be an iterable containing
         strings. Parsing will honor any aliases when trying to "find" a given
@@ -133,6 +135,19 @@ class Context(object):
     def needs_positional_arg(self):
         return any(x.value is None for x in self.positional_args)
 
+    @property
+    def as_kwargs(self):
+        """
+        This context's arguments' values keyed by their ``.name`` attribute.
+
+        Results in a dict suitable for use in Python contexts, where e.g. an
+        arg named ``foo-bar`` becomes accessible as ``foo_bar``.
+        """
+        ret = {}
+        for arg in self.args.values():
+            ret[arg.name] = arg.value
+        return ret
+
     def help_for(self, flag):
         """
         Return 2-tuple of ``(flag-spec, help-string)`` for given ``flag``.
@@ -161,6 +176,11 @@ class Context(object):
                     if arg.optional:
                         valuestr = "[%s]" % valuestr
             else:
+                # no value => boolean
+                # check for inverse
+                if name in self.inverse_flags.values():
+                    name = "--[no-]%s" % name[2:]
+
                 valuestr = ""
             # Tack together
             full_names.append(name + valuestr)

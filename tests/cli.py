@@ -1,10 +1,10 @@
 import os
 import sys
 
-from spec import eq_, skip, Spec, ok_, trap
-from mock import patch
+from spec import eq_, skip, Spec, ok_, trap, raises
+from mock import patch, Mock
 
-from invoke.cli import parse, dispatch
+from invoke.cli import parse, tasks_from_contexts
 from invoke.context import Context
 from invoke.runner import run
 from invoke.parser import Parser
@@ -13,56 +13,63 @@ from invoke.tasks import task
 from invoke.exceptions import Failure
 import invoke
 
-from _utils import support
+from _utils import (
+    _dispatch, _output_eq, IntegrationSpec, cd, expect_exit, run_in_configs
+)
 
 
-def _output_eq(cmd, expected):
-    return eq_(run(cmd).stdout, expected)
-
-
-class CLI(Spec):
+class CLI(IntegrationSpec):
     "Command-line behavior"
-    def setup(self):
-        os.chdir(support)
 
-    def _basic(self):
-        self.result = run("invoke -c integration print_foo", hide='both')
+    class basic_invocation:
+        @trap
+        def vanilla(self):
+            os.chdir('implicit')
+            _dispatch('inv foo')
+            eq_(sys.stdout.getvalue(), "Hm\n")
 
-    # Yo dogfood, I heard you like invoking
-    @trap
-    def basic_invocation(self):
-        self._basic()
-        _output_eq("invoke -c integration print_foo", "foo\n")
+        @trap
+        def vanilla_with_explicit_collection(self):
+            # Duplicates _output_eq, but this way that can change w/o breaking
+            # our expectations.
+            _dispatch('inv -c integration print_foo')
+            eq_(sys.stdout.getvalue(), "foo\n")
 
-    @trap
-    def implicit_task_module(self):
-        # Contains tasks.py
-        os.chdir('implicit')
-        # Doesn't specify --collection
-        _output_eq("invoke foo", "Hm\n")
+        def args(self):
+            _output_eq('-c integration print_name --name inigo', "inigo\n")
 
-    @trap
-    def invocation_with_args(self):
+        def underscored_args(self):
+            _output_eq(
+                '-c integration print_underscored_arg --my-option whatevs',
+                "whatevs\n",
+            )
+
+
+    def missing_collection_yields_useful_error(self):
         _output_eq(
-            "invoke -c integration print_name --name whatevs",
-            "whatevs\n"
+            '-c huhwhat -l',
+            stderr="Can't find any collection named 'huhwhat'!\n",
+            code=1
         )
 
+    def missing_default_collection_doesnt_say_None(self):
+        with cd('/'):
+            _output_eq(
+                '-l',
+                stderr="Can't find any collection named 'tasks'!\n",
+                code=1
+            )
+
     @trap
-    def invocation_with_underscored_args(self):
-        _output_eq(
-            "invoke -c integration print_underscored_arg --my-option whatevs",
-            "whatevs\n"
-        )
+    def missing_default_task_prints_help(self):
+        with expect_exit():
+            _dispatch("inv -c foo")
+        ok_("Core options:" in sys.stdout.getvalue())
 
     def contextualized_tasks_are_given_parser_context_arg(self):
         # go() in contextualized.py just returns its initial arg
-        retval = dispatch(['-c', 'contextualized', 'go'])[0]
+        retval = list(_dispatch('invoke -c contextualized go').values())[0]
         assert isinstance(retval, Context)
-
-    @trap
-    def shorthand_binary_name(self):
-        _output_eq("invoke -c integration print_foo", "foo\n")
 
     def core_help_option_prints_core_help(self):
         # TODO: change dynamically based on parser contents?
@@ -78,10 +85,10 @@ Usage: inv[oke] [--core-opts] task1 [--task1-opts] ... taskN [--taskN-opts]
 
 Core options:
   --no-dedupe                      Disable task deduplication.
-  -c STRING, --collection=STRING   Specify collection name to load. May be
-                                   given >1 time.
+  -c STRING, --collection=STRING   Specify collection name to load.
   -d, --debug                      Enable debug output.
   -e, --echo                       Echo executed commands before running.
+  -f STRING, --config=STRING       Runtime configuration file to use.
   -h [STRING], --help[=STRING]     Show core or per-task help and exit.
   -H STRING, --hide=STRING         Set default value of run()'s 'hide' kwarg.
   -l, --list                       List available tasks.
@@ -93,12 +100,9 @@ Core options:
                                    commands fail.
 
 """.lstrip()
-        r1 = run("inv -h", hide='out')
-        r2 = run("inv --help", hide='out')
-        eq_(r1.stdout, expected)
-        eq_(r2.stdout, expected)
+        for flag in ['-h', '--help']:
+            _output_eq(flag, expected)
 
-    @trap
     def per_task_help_prints_help_for_task_only(self):
         expected = """
 Usage: inv[oke] [--core-opts] punch [--options] [other tasks here ...]
@@ -111,12 +115,9 @@ Options:
   -w STRING, --who=STRING   Who to punch
 
 """.lstrip()
-        r1 = run("inv -c decorator -h punch", hide='out')
-        r2 = run("inv -c decorator --help punch", hide='out')
-        eq_(r1.stdout, expected)
-        eq_(r2.stdout, expected)
+        for flag in ['-h', '--help']:
+            _output_eq('-c decorator {0} punch'.format(flag), expected)
 
-    @trap
     def per_task_help_works_for_unparameterized_tasks(self):
         expected = """
 Usage: inv[oke] [--core-opts] biz [other tasks here ...]
@@ -128,33 +129,69 @@ Options:
   none
 
 """.lstrip()
-        r = run("inv -c decorator -h biz", hide='out')
-        eq_(r.stdout, expected)
+        _output_eq('-c decorator -h biz', expected)
 
-    @trap
     def per_task_help_displays_docstrings_if_given(self):
         expected = """
 Usage: inv[oke] [--core-opts] foo [other tasks here ...]
 
 Docstring:
   Foo the bar.
-  
+
 Options:
   none
 
 """.lstrip()
-        r = run("inv -c decorator -h foo", hide='out')
-        eq_(r.stdout, expected)
+        _output_eq('-c decorator -h foo', expected)
+
+    def per_task_help_dedents_correctly(self):
+        expected = """
+Usage: inv[oke] [--core-opts] foo2 [other tasks here ...]
+
+Docstring:
+  Foo the bar:
+
+    example code
+
+  Added in 1.0
+
+Options:
+  none
+
+""".lstrip()
+        _output_eq('-c decorator -h foo2', expected)
+
+    def per_task_help_dedents_correctly_for_alternate_docstring_style(self):
+        expected = """
+Usage: inv[oke] [--core-opts] foo3 [other tasks here ...]
+
+Docstring:
+  Foo the other bar:
+
+    example code
+
+  Added in 1.1
+
+Options:
+  none
+
+""".lstrip()
+        _output_eq('-c decorator -h foo3', expected)
+
+    def version_info(self):
+        _output_eq('-V', "Invoke %s\n" % invoke.__version__)
 
     @trap
-    def version_info(self):
-        eq_(run("invoke -V").stdout, "Invoke %s\n" % invoke.__version__)
+    def version_override(self):
+        with expect_exit():
+            _dispatch('notinvoke -V', version="nope 1.0")
+        eq_(sys.stdout.getvalue(), "nope 1.0\n")
 
 
     class task_list:
         "--list"
 
-        def _listing(self, *lines):
+        def _listing(self, lines):
             return ("""
 Available tasks:
 
@@ -162,109 +199,216 @@ Available tasks:
 
 """ % '\n'.join("  " + x for x in lines)).lstrip()
 
-        @trap
+        def _list_eq(self, collection, listing):
+            cmd = '-c {0} --list'.format(collection)
+            _output_eq(cmd, self._listing(listing))
+
         def simple_output(self):
-            expected = self._listing(
+            expected = self._listing((
                 'bar',
+                'biz',
+                'boz',
                 'foo',
+                'post1',
+                'post2',
                 'print_foo',
                 'print_name',
                 'print_underscored_arg',
-            )
+            ))
             for flag in ('-l', '--list'):
-                eq_(run("invoke -c integration %s" % flag).stdout, expected)
+                _output_eq('-c integration {0}'.format(flag), expected)
 
-        @trap
         def namespacing(self):
-            # TODO: break out the listing behavior into a testable method, down
-            # with subprocesses!
-            expected = self._listing(
+            self._list_eq('namespacing', (
                 'toplevel',
                 'module.mytask',
-            )
-            eq_(run("invoke -c namespacing --list").stdout, expected)
+            ))
 
-        @trap
         def top_level_tasks_listed_first(self):
-            expected = self._listing(
+            self._list_eq('simple_ns_list', (
                 'z_toplevel',
                 'a.subtask'
-            )
-            eq_(run("invoke -c simple_ns_list --list").stdout, expected)
+            ))
 
-        @trap
         def subcollections_sorted_in_depth_order(self):
-            expected = self._listing(
+            self._list_eq('deeper_ns_list', (
                 'toplevel',
                 'a.subtask',
                 'a.nother.subtask',
-            )
-            eq_(run("invoke -c deeper_ns_list --list").stdout, expected)
+            ))
 
-        @trap
         def aliases_sorted_alphabetically(self):
-            expected = self._listing(
+            self._list_eq('alias_sorting', (
                 'toplevel (a, z)',
-            )
-            eq_(run("invoke -c alias_sorting --list").stdout, expected)
+            ))
 
-
-        @trap
         def default_tasks(self):
             # sub-ns default task display as "real.name (collection name)"
-            expected = self._listing(
+            self._list_eq('explicit_root', (
                 'top_level (othertop)',
                 'sub.sub_task (sub, sub.othersub)',
+            ))
+
+        def docstrings_shown_alongside(self):
+            self._list_eq('docstrings', (
+                'leading_whitespace    foo',
+                'no_docstring',
+                'one_line              foo',
+                'two_lines             foo',
+                'with_aliases (a, b)   foo',
+            ))
+
+        def empty_collections_say_no_tasks(self):
+            _output_eq(
+                "-c empty -l",
+                "No tasks found in collection 'empty'!\n"
             )
-            eq_(run("invoke -c explicit_root --list").stdout, expected)
 
-    @trap
-    def no_deduping(self):
-        expected = """
-foo
-foo
-bar
-""".lstrip()
-        eq_(run("invoke -c integration --no-dedupe foo bar").stdout, expected)
 
-    @trap
-    def debug_flag(self):
-        assert 'my-sentinel' in run("invoke -d -c debugging foo").stderr
+    def debug_flag_activates_logging(self):
+        # Have to patch our logger to get in before Nose logcapture kicks in.
+        with patch('invoke.util.debug') as debug:
+            _dispatch('inv -d -c debugging foo')
+            debug.assert_called_with('my-sentinel')
+
+
+    class autoprinting:
+        def defaults_to_off_and_no_output(self):
+            _output_eq("-c autoprint nope", "")
+
+        def prints_return_value_to_stdout_when_on(self):
+            _output_eq("-c autoprint yup", "It's alive!\n")
+
+        def prints_return_value_to_stdout_when_on_and_in_collection(self):
+            _output_eq("-c autoprint sub.yup", "It's alive!\n")
+
+        def does_not_fire_on_pre_tasks(self):
+            _output_eq("-c autoprint pre_check", "")
+
+        def does_not_fire_on_post_tasks(self):
+            _output_eq("-c autoprint post_check", "")
+
 
     class run_options:
         "run() related CLI flags"
         def _test_flag(self, flag, kwarg, value):
             with patch('invoke.context.run') as run:
-                dispatch(flag + ['-c', 'contextualized', 'run'])
-                run.assert_called_with('x', **{kwarg: value})
+                _dispatch('invoke {0} -c contextualized run'.format(flag))
+                ok_(run.call_args[1][kwarg] == value)
 
         def warn_only(self):
-            self._test_flag(['-w'], 'warn', True)
+            self._test_flag('-w', 'warn', True)
 
         def pty(self):
-            self._test_flag(['-p'], 'pty', True)
+            self._test_flag('-p', 'pty', True)
 
         def hide(self):
-            self._test_flag(['--hide', 'both'], 'hide', 'both')
+            self._test_flag('--hide both', 'hide', 'both')
 
         def echo(self):
-            self._test_flag(['-e'], 'echo', True)
+            self._test_flag('-e', 'echo', True)
+
+
+    class configuration:
+        "Configuration-related concerns"
+
+        def per_project_config_files_are_loaded(self):
+            with cd(os.path.join('configs', 'yaml')):
+                _dispatch("inv mytask")
+
+        def runtime_config_file_honored(self):
+            with cd('configs'):
+                _dispatch("inv -c runtime -f yaml/invoke.yaml mytask")
+
+        def run_echo_honors_configuration_overrides(self):
+            # Try a few realistic-for-this-setting levels:
+            with run_in_configs() as run:
+                # Collection
+                _dispatch('invoke -c collection go')
+                eq_(run.call_args_list[-1][1]['echo'], True)
+                # Runtime conf file
+                _dispatch('invoke -c contextualized -f echo.yaml run')
+                eq_(run.call_args_list[-1][1]['echo'], True)
+                # Runtime beats collection
+                _dispatch('invoke -c collection -f no-echo.yaml go')
+                eq_(run.call_args_list[-1][1]['echo'], False)
+                # Flag beats runtime
+                _dispatch('invoke -c contextualized -f no-echo.yaml -e run')
+                eq_(run.call_args_list[-1][1]['echo'], True)
+
+        def tasks_dedupe_honors_configuration(self):
+            # Kinda-sorta duplicates some tests in executor.py, but eh.
+            with cd('configs'):
+                # Runtime conf file
+                _output_eq(
+                    '-c integration -f no-dedupe.yaml biz',
+"""foo
+foo
+bar
+biz
+post1
+post2
+post2
+""")
+                # Flag beats runtime
+                _output_eq(
+                    '-c integration -f dedupe.yaml --no-dedupe biz',
+"""foo
+foo
+bar
+biz
+post1
+post2
+post2
+""")
+                
+
+        # * debug (top level?)
+        # * hide (run.hide...lol)
+        # * pty (run.pty)
+        # * warn (run.warn)
+
+        def env_vars_load_with_prefix(self):
+            os.environ['INVOKE_RUN_ECHO'] = "1"
+            with patch('invoke.context.run') as run:
+                _dispatch('invoke -c contextualized run')
+                ok_(run.call_args[1]['echo'] == True)
+
+        def collection_defaults_dont_block_env_var_run_settings(self):
+            # Environ setting run.warn
+            os.environ['INVOKE_RUN_WARN'] = "1"
+            with run_in_configs() as run:
+                # This collection sets run = {echo: true}
+                # If merging isn't done, it will overwrite the low level
+                # defaults, meaning the env var adapter won't see that
+                # 'run_warn' is a valid setting.
+                _dispatch('invoke -c collection go')
+                ok_(run.call_args[1]['echo'] == True)
+                ok_(run.call_args[1]['warn'] == True)
 
 
 TB_SENTINEL = 'Traceback (most recent call last)'
 
 class HighLevelFailures(Spec):
-
+    @trap
     def command_failure(self):
         "Command failure doesn't show tracebacks"
-        result = run("inv -c fail simple", warn=True, hide='both')
-        assert TB_SENTINEL not in result.stderr
-        assert result.exited != 0
+        with patch('sys.exit') as exit:
+            _dispatch('inv -c fail simple')
+            assert TB_SENTINEL not in sys.stderr.getvalue()
+            exit.assert_called_with(1)
 
     class parsing:
+        @trap
         def should_not_show_tracebacks(self):
-            result = run("inv -c fail missing_pos", warn=True, hide='both')
-            assert TB_SENTINEL not in result.stderr
+            # Ensure we fall out of dispatch() on missing parser args,
+            # but are still able to look at stderr to ensure no TB got printed
+            with patch('sys.exit', Mock(side_effect=SystemExit)):
+                try:
+                    _dispatch("inv -c fail missing_pos")
+                except SystemExit:
+                    pass
+                assert TB_SENTINEL not in sys.stderr.getvalue()
 
         def should_show_core_usage_on_core_failures(self):
             skip()
@@ -288,7 +432,7 @@ class CLIParsing(Spec):
         @task(aliases=['mytask27'])
         def mytask2():
             pass
-        @task
+        @task(default=True)
         def mytask3(mystring):
             pass
         @task
@@ -331,6 +475,11 @@ class CLIParsing(Spec):
 
     def subcollection_default_tasks(self):
         self._compare_names("sub", "sub.subtask")
+
+    def loaded_collection_default_task(self):
+        result = tasks_from_contexts(self._parse(''), self.c)
+        eq_(len(result), 1)
+        eq_(result[0][0], 'mytask3')
 
     def boolean_args(self):
         "mytask --boolean"
@@ -399,11 +548,3 @@ class CLIParsing(Spec):
             a = r[0].args
             eq_(a.b.value, True)
             eq_(a.v.value, True)
-
-    def globbed_shortflags_with_multipass_parsing(self):
-        "mytask -cb and -bc"
-        for args in ('-bc', '-cb'):
-            _, _, r = parse(['mytask4', args], self.c)
-            a = r[0].args
-            eq_(a.clean.value, True)
-            eq_(a.browse.value, True)
